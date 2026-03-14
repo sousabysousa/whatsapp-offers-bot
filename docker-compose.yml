@@ -1,0 +1,115 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: whatsapp-offers-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-whatsapp_offers}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - whatsapp-offers-network
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: whatsapp-offers-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - whatsapp-offers-network
+
+  # WAHA (WhatsApp HTTP API)
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: whatsapp-offers-waha
+    environment:
+      WAHA_SWAGGER_ENABLED: "true"
+      WAHA_SWAGGER_URL: "/swagger"
+    ports:
+      - "3001:3000"
+    volumes:
+      - waha_data:/app/sessions
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - whatsapp-offers-network
+
+  # Node.js Backend & Frontend
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-offers-app
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: mysql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-whatsapp_offers}
+      REDIS_URL: redis://redis:6379
+      WAHA_API_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:-your_waha_api_key}
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_key}
+      VITE_APP_ID: ${VITE_APP_ID}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL}
+      VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL}
+      OWNER_OPEN_ID: ${OWNER_OPEN_ID}
+      OWNER_NAME: ${OWNER_NAME}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY}
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL}
+      VITE_FRONTEND_FORGE_API_KEY: ${VITE_FRONTEND_FORGE_API_KEY}
+      VITE_FRONTEND_FORGE_API_URL: ${VITE_FRONTEND_FORGE_API_URL}
+      VITE_APP_TITLE: ${VITE_APP_TITLE:-WhatsApp Offers Bot}
+      VITE_APP_LOGO: ${VITE_APP_LOGO}
+      VITE_ANALYTICS_ENDPOINT: ${VITE_ANALYTICS_ENDPOINT}
+      VITE_ANALYTICS_WEBSITE_ID: ${VITE_ANALYTICS_WEBSITE_ID}
+      ENABLE_WORKERS: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      waha:
+        condition: service_healthy
+    volumes:
+      - ./client/dist:/app/client/dist
+      - ./.manus-logs:/app/.manus-logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - whatsapp-offers-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  waha_data:
+
+networks:
+  whatsapp-offers-network:
+    driver: bridge
